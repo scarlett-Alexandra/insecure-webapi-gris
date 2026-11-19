@@ -1,4 +1,6 @@
 import json
+import os
+import hmac
 import random
 import hashlib
 import mysql.connector
@@ -25,6 +27,19 @@ function loadDatabaseSettings(pathjs):
 	return json_a;
 
 """
+# A02: scrypt con sal aleatoria (libreria estandar). Formato guardado: sal$hash en hexadecimal
+def hashPassword(password, sal=None):
+	sal = sal or os.urandom(16)
+	h = hashlib.scrypt(str(password).encode(), salt=sal, n=2**14, r=8, p=1, dklen=32)
+	return sal.hex() + '$' + h.hex()
+
+def checkPassword(password, guardado):
+	try:
+		sal, _ = str(guardado).split('$')
+		return hmac.compare_digest(hashPassword(password, bytes.fromhex(sal)), str(guardado))
+	except ValueError:
+		return False
+
 def getToken():
 	tiempo = datetime.now().timestamp()
 	numero = random.random()
@@ -73,7 +88,7 @@ def Registro():
 	R = False
 	try:
 		with db.cursor() as cursor:
-			cursor.execute('insert into Usuario values(null,%s,%s,md5(%s))', (request.json["uname"], request.json["email"], request.json["password"]))
+			cursor.execute('insert into Usuario values(null,%s,%s,%s)', (request.json["uname"], request.json["email"], hashPassword(request.json["password"])))
 			R = cursor.lastrowid
 			db.commit()
 		db.close()
@@ -121,7 +136,7 @@ def Login():
 	R = False
 	try:
 		with db.cursor() as cursor:
-			cursor.execute('Select id from Usuario where uname = %s and password = md5(%s)', (request.json["uname"], request.json["password"]))
+			cursor.execute('Select id,password from Usuario where uname = %s', (request.json["uname"],))
 			R = cursor.fetchall()
 	except Exception as e: 
 		print(e)
@@ -129,10 +144,11 @@ def Login():
 		return {"R":-2}
 	
 	
-	if not R:
+	# A02: se compara contra el hash guardado (si el usuario no existe tambien se rechaza)
+	if not R or not checkPassword(request.json["password"], R[0][1]):
 		db.close()
 		return {"R":-3}
-	
+
 	T = getToken();
 	#file_put_contents('/tmp/log','insert into AccesoToken values('.R[0].',"'.T.'",now())');
 	with open("/tmp/log","a") as log:
