@@ -185,7 +185,10 @@ def Imagen():
 	# TODO checar si estan vacio los elementos del json
 	if not R:
 		return {"R":-1}
-	
+	# A01: la extension forma parte de la ruta destino; solo se aceptan estas
+	if str(request.json['ext']).lower() not in ('png', 'jpg', 'jpeg', 'gif'):
+		return {"R":-5}
+
 	dbcnf = loadDatabaseSettings('db.json');
 	db = mysql.connector.connect(
 		host='localhost', port = dbcnf['port'],
@@ -208,6 +211,10 @@ def Imagen():
 		return {"R":-2}
 	
 	
+	# A01: sin token valido no se sube nada (antes: IndexError)
+	if not R:
+		db.close()
+		return {"R":-4}
 	id_Usuario = R[0][0];
 	with open(f'tmp/{id_Usuario}',"wb") as imagen:
 		imagen.write(base64.b64decode(request.json['data'].encode()))
@@ -267,7 +274,11 @@ def Descargar():
 	# TODO validar correo en json
 	# Comprobar que el usuario sea valido
 	TKN = request.json['token'];
-	idImagen = request.json['id'];
+	try:
+		idImagen = int(request.json['id'])
+	except (ValueError, TypeError):
+		db.close()
+		return {"R":-1}
 	
 	R = False
 	try:
@@ -278,20 +289,25 @@ def Descargar():
 		print(e)
 		db.close()
 		return {"R":-2}
-		
-	
-	
-	# Buscar imagen y enviarla
+	# A01: sin token valido no se descarga nada (antes: el resultado se ignoraba)
+	if not R:
+		db.close()
+		return {"R":-5}
+	id_Usuario = R[0][0]
+
+	# Buscar imagen y enviarla (A01/IDOR: solo si es del usuario del token)
 	
 	try:
 		with db.cursor() as cursor:
-			cursor.execute('Select name,ruta from Imagen where id = %s', (idImagen,))
+			cursor.execute('Select name,ruta from Imagen where id = %s and id_Usuario = %s', (idImagen, id_Usuario))
 			R = cursor.fetchall()
 	except Exception as e: 
 		print(e)
 		db.close()
 		return {"R":-3}
-	print(Path("img").resolve(),R[0][1])
+	db.close()
+	if not R:
+		return {"R":-4}
 	return static_file(R[0][1],Path(".").resolve())
 
 if __name__ == '__main__':
